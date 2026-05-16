@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const pkg = require('./package.json');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,9 +11,17 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'views/index.html'));
 });
 
-const UA =
+app.get('/api/version', (req, res) => {
+  res.json({ version: pkg.version });
+});
+
+const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+// Instagram serves a full contextJSON with the video URL only for crawler UAs.
+const CRAWLER_UA =
+  'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)';
 
 function extractShortcode(rawUrl) {
   try {
@@ -46,7 +55,7 @@ async function fetchEmbedHtml(shortcode) {
   const embedUrl = `https://www.instagram.com/p/${shortcode}/embed/captioned/`;
   const r = await fetch(embedUrl, {
     headers: {
-      'User-Agent': UA,
+      'User-Agent': CRAWLER_UA,
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
     },
@@ -55,30 +64,58 @@ async function fetchEmbedHtml(shortcode) {
   return await r.text();
 }
 
+function extractContextMedia(html) {
+  const m = html.match(/"contextJSON":"((?:\\.|[^"\\])*)"/);
+  if (!m) return null;
+  try {
+    const inner = JSON.parse('"' + m[1] + '"');
+    const data = JSON.parse(inner);
+    return (data && data.context && data.context.media) || data.shortcode_media || null;
+  } catch {
+    return null;
+  }
+}
+
+function extractCaption(media, html) {
+  const edges =
+    media &&
+    media.edge_media_to_caption &&
+    media.edge_media_to_caption.edges;
+  if (edges && edges.length > 0 && edges[0].node && edges[0].node.text) {
+    return edges[0].node.text;
+  }
+  const m = html.match(/<meta property="og:title" content="([^"]+)"/);
+  return m ? decodeHtmlEntities(m[1]) : null;
+}
+
 function parseReel(html) {
-  let videoUrl = null;
-  let m = html.match(/"video_url":"([^"]+)"/);
-  if (m) videoUrl = unescapeJsonString(m[1]);
+  const media = extractContextMedia(html);
+
+  let videoUrl = media && media.video_url ? media.video_url : null;
   if (!videoUrl) {
-    m = html.match(/<meta property="og:video" content="([^"]+)"/);
+    let m = html.match(/"video_url":"([^"]+)"/);
+    if (m) videoUrl = unescapeJsonString(m[1]);
+  }
+  if (!videoUrl) {
+    let m = html.match(/<meta property="og:video" content="([^"]+)"/);
     if (m) videoUrl = decodeHtmlEntities(m[1]);
   }
   if (!videoUrl) {
-    m = html.match(/<video[^>]*src="([^"]+)"/i);
+    let m = html.match(/<video[^>]*src="([^"]+)"/i);
     if (m) videoUrl = decodeHtmlEntities(m[1]);
   }
 
-  let thumbnail = null;
-  m = html.match(/"display_url":"([^"]+)"/);
-  if (m) thumbnail = unescapeJsonString(m[1]);
+  let thumbnail = media && media.display_url ? media.display_url : null;
   if (!thumbnail) {
-    m = html.match(/<meta property="og:image" content="([^"]+)"/);
+    let m = html.match(/"display_url":"([^"]+)"/);
+    if (m) thumbnail = unescapeJsonString(m[1]);
+  }
+  if (!thumbnail) {
+    let m = html.match(/<meta property="og:image" content="([^"]+)"/);
     if (m) thumbnail = decodeHtmlEntities(m[1]);
   }
 
-  let caption = null;
-  m = html.match(/<meta property="og:title" content="([^"]+)"/);
-  if (m) caption = decodeHtmlEntities(m[1]);
+  const caption = extractCaption(media, html);
 
   return { videoUrl, thumbnail, caption };
 }
@@ -115,7 +152,10 @@ app.get('/api/download', async (req, res) => {
     } catch {
       return res.status(400).send('URL inválida');
     }
-    if (parsed.protocol !== 'https:' || !/\.(cdninstagram|fbcdn)\.net$/i.test(parsed.hostname)) {
+    if (
+      parsed.protocol !== 'https:' ||
+      !/\.(?:cdninstagram\.com|cdninstagram\.net|fbcdn\.net)$/i.test(parsed.hostname)
+    ) {
       return res.status(400).send('URL de mídia não permitida');
     }
 
@@ -123,7 +163,7 @@ app.get('/api/download', async (req, res) => {
     const filename = rawName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'reel.mp4';
 
     const upstream = await fetch(mediaUrl, {
-      headers: { 'User-Agent': UA, Referer: 'https://www.instagram.com/' },
+      headers: { 'User-Agent': BROWSER_UA, Referer: 'https://www.instagram.com/' },
     });
     if (!upstream.ok || !upstream.body) {
       return res.status(502).send('Falha ao baixar o vídeo (' + upstream.status + ')');

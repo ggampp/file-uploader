@@ -2,16 +2,57 @@
   var form = document.getElementById('reel-form');
   var urlInput = document.getElementById('reel-url');
   var submitBtn = document.getElementById('submit-btn');
+  var clearBtn = document.getElementById('clear-btn');
+  var pasteBtn = document.getElementById('paste-btn');
   var statusEl = document.getElementById('status');
   var resultEl = document.getElementById('result');
   var preview = document.getElementById('preview');
   var captionEl = document.getElementById('caption');
   var downloadLink = document.getElementById('download-link');
+  var versionBadge = document.getElementById('version-badge');
 
   function setStatus(msg, kind) {
     statusEl.textContent = msg || '';
     statusEl.className = kind || '';
   }
+
+  function resetResult() {
+    resultEl.hidden = true;
+    preview.removeAttribute('src');
+    preview.load();
+    captionEl.textContent = '';
+    downloadLink.removeAttribute('href');
+  }
+
+  fetch('/api/version')
+    .then(function (r) { return r.json(); })
+    .then(function (d) { versionBadge.textContent = 'v' + d.version; })
+    .catch(function () { versionBadge.textContent = ''; });
+
+  clearBtn.addEventListener('click', function () {
+    urlInput.value = '';
+    urlInput.focus();
+    setStatus('');
+    resetResult();
+  });
+
+  pasteBtn.addEventListener('click', async function () {
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+      setStatus('Seu navegador não permite ler o clipboard. Cole manualmente.', 'error');
+      return;
+    }
+    try {
+      var text = await navigator.clipboard.readText();
+      if (!text) {
+        setStatus('Clipboard vazio.', 'error');
+        return;
+      }
+      urlInput.value = text.trim();
+      setStatus('Link colado.', 'success');
+    } catch (err) {
+      setStatus('Não foi possível ler o clipboard: ' + (err && err.message ? err.message : err), 'error');
+    }
+  });
 
   form.addEventListener('submit', async function (e) {
     e.preventDefault();
@@ -19,9 +60,7 @@
     if (!url) return;
 
     submitBtn.disabled = true;
-    resultEl.hidden = true;
-    preview.removeAttribute('src');
-    preview.load();
+    resetResult();
     setStatus('Buscando vídeo...');
 
     try {
