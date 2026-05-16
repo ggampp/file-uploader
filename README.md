@@ -1,22 +1,51 @@
-# Instagram Reels Downloader
+# Multi Downloader
 
-Web app simples para baixar Reels públicos do Instagram a partir de um link.
+Web app simples para baixar vídeos públicos a partir de um link. Suporta:
+
+- **Instagram** (Reels, posts em vídeo, IGTV)
+- **X.com / Twitter** (vídeos em tweets)
+- **YouTube** (vídeos, Shorts) — *ver caveat abaixo*
+
+Para uso pessoal. Respeite os direitos do criador.
 
 ## Como funciona
 
-1. O usuário cola a URL de um Reels (ex.: `https://www.instagram.com/reel/XYZ/`).
-2. O backend Express acessa a página de *embed* pública do Instagram, extrai a
-   URL direta do vídeo e devolve em JSON.
-3. O front-end exibe um preview do vídeo e um botão de download.
-4. O download é feito via proxy do servidor (`/api/download`) para forçar o
-   nome do arquivo `.mp4` e evitar restrições de CORS.
+Para cada plataforma o backend tenta duas estratégias em ordem. O frontend
+mostra um log de execução em tempo real (SSE) para você ver o que está
+acontecendo.
 
-Funciona apenas com posts públicos. Use de forma responsável e respeitando os
-direitos do criador do conteúdo.
+| Plataforma | Estratégia 1 | Estratégia 2 |
+|---|---|---|
+| Instagram | embed `/embed/captioned/` + `contextJSON` (UA crawler) | página `/reel/` + meta `og:video` (UA Googlebot) |
+| Twitter   | `cdn.syndication.twimg.com/tweet-result` (oficial-ish) | `api.vxtwitter.com` (community mirror) |
+| YouTube   | `@distube/ytdl-core` com formato mp4 áudio+vídeo | `ytdl-core` fallback video-only |
+
+O download é proxiado por `/api/download` para forçar `Content-Disposition`
+e burlar restrições de CORS/cookies. A allowlist do proxy cobre:
+
+- `*.cdninstagram.com`, `*.fbcdn.net` (Instagram)
+- `*.twimg.com` (Twitter)
+- `*.googlevideo.com` (YouTube)
+
+## Caveat sobre YouTube
+
+`ytdl-core` precisa fazer requisições para o YouTube a partir do servidor.
+IPs de provedores de nuvem (Render, Heroku, Vercel, etc.) são
+frequentemente *rate-limited* ou bloqueados (HTTP 429) e o YouTube muda o
+formato do player com frequência. Resultado:
+
+- Pode funcionar.
+- Pode dar erro 429 ("Too Many Requests") — sem o que fazer no nível do
+  código além de aguardar.
+- Pode quebrar quando o YouTube atualiza o player; basta atualizar
+  `@distube/ytdl-core` para a versão mais nova.
+
+Para uso 100% confiável de YouTube, rode o app localmente (seu IP
+residencial é tratado como usuário comum).
 
 ## Requisitos
 
-- Node.js 18+ (usa o `fetch` nativo).
+- Node.js 18+ (usa `fetch` nativo).
 
 ## Como rodar
 
@@ -29,6 +58,9 @@ Acesse <http://localhost:3000>.
 
 ## Endpoints
 
-- `GET /api/reel?url=<link-do-reels>` — devolve `{ videoUrl, thumbnail, caption, shortcode }`.
-- `GET /api/download?url=<url-do-video>&filename=<nome.mp4>` — faz o proxy do
-  download direto do CDN do Instagram.
+- `GET /api/version` → `{ version }`.
+- `GET /api/extract?url=<link>` → **SSE stream**. Eventos:
+  - `event: log` com `{ level, msg, time }`
+  - `event: result` com `{ ok, platform, strategy, videoUrl, thumbnail, caption, shortcode }` ou `{ ok: false, error }`
+- `GET /api/download?url=<media-url>&filename=<name.mp4>` → proxy de
+  download direto do CDN (só hosts no allowlist).
