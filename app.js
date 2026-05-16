@@ -173,21 +173,32 @@ async function twitterSyndicationStrategy(url, log) {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const data = await r.json();
 
-  let variants = null;
-  if (data.video && data.video.variants) variants = data.video.variants;
-  else if (Array.isArray(data.mediaDetails)) {
+  // Prefer mediaDetails[].video_info.variants (has bitrate), fall back to data.video.variants.
+  let rawVariants = null;
+  if (Array.isArray(data.mediaDetails)) {
     const m = data.mediaDetails.find(
       (x) => x.type === 'video' || x.type === 'animated_gif'
     );
-    if (m && m.video_info && m.video_info.variants) variants = m.video_info.variants;
+    if (m && m.video_info && Array.isArray(m.video_info.variants)) {
+      rawVariants = m.video_info.variants;
+    }
   }
-  if (!variants) throw new Error('tweet sem vídeo');
+  if (!rawVariants && data.video && Array.isArray(data.video.variants)) {
+    rawVariants = data.video.variants;
+  }
+  if (!rawVariants) throw new Error('tweet sem vídeo');
 
-  const mp4s = variants.filter((v) =>
-    /video\/mp4/.test(v.content_type || v.type || '')
-  );
+  // Normalize both shapes: {content_type,url,bitrate} or {type,src}.
+  const mp4s = rawVariants
+    .map((v) => ({
+      type: v.content_type || v.type || '',
+      url: v.url || v.src || null,
+      bitrate: typeof v.bitrate === 'number' ? v.bitrate : 0,
+    }))
+    .filter((v) => v.url && /video\/mp4/.test(v.type));
+
   if (!mp4s.length) throw new Error('sem variante mp4');
-  mp4s.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+  mp4s.sort((a, b) => b.bitrate - a.bitrate);
   log(`${mp4s.length} variantes mp4, picking bitrate=${mp4s[0].bitrate || '?'}`);
 
   return {
