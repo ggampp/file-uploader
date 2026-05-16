@@ -143,6 +143,54 @@ async function instagramContextJsonStrategy(url, log) {
   };
 }
 
+// Instagram's web GraphQL endpoint. Works for Reels that the embed page hides
+// behind a login/age wall. Requires MINIMAL headers — adding Origin/Referer/
+// X-IG-App-ID flips it to 401 "Please wait a few minutes" (anti-bot fingerprint).
+const INSTAGRAM_GRAPHQL_DOC_ID = '8845758582119845';
+
+async function instagramGraphqlStrategy(url, log) {
+  const shortcode = extractInstagramShortcode(url);
+  if (!shortcode) throw new Error('shortcode não encontrado');
+  log(`shortcode: ${shortcode}`);
+
+  const variables = encodeURIComponent(JSON.stringify({ shortcode }));
+  const apiUrl =
+    'https://www.instagram.com/graphql/query/' +
+    `?doc_id=${INSTAGRAM_GRAPHQL_DOC_ID}&variables=${variables}`;
+  log(`POST graphql doc_id=${INSTAGRAM_GRAPHQL_DOC_ID} (UA-only)`);
+
+  const r = await fetch(apiUrl, { headers: { 'User-Agent': BROWSER_UA } });
+  if (!r.ok) {
+    let body = '';
+    try { body = (await r.text()).slice(0, 120); } catch {}
+    throw new Error(`HTTP ${r.status} ${body}`);
+  }
+  const data = await r.json();
+  const media = data && data.data && data.data.xdt_shortcode_media;
+  if (!media) {
+    throw new Error(
+      (data && data.message) || 'resposta sem xdt_shortcode_media'
+    );
+  }
+  if (!media.video_url) {
+    throw new Error('media sem video_url (pode não conter vídeo)');
+  }
+  log(`vídeo encontrado: ${media.__typename}`);
+
+  return {
+    videoUrl: media.video_url,
+    thumbnail: media.display_url || media.thumbnail_src || null,
+    caption:
+      (media.edge_media_to_caption &&
+        media.edge_media_to_caption.edges &&
+        media.edge_media_to_caption.edges[0] &&
+        media.edge_media_to_caption.edges[0].node &&
+        media.edge_media_to_caption.edges[0].node.text) ||
+      null,
+    shortcode,
+  };
+}
+
 async function instagramOgMetaStrategy(url, log) {
   const shortcode = extractInstagramShortcode(url);
   if (!shortcode) throw new Error('shortcode não encontrado');
@@ -444,6 +492,7 @@ const PLATFORMS = {
   instagram: {
     strategies: [
       { name: 'instagram:contextJSON', fn: instagramContextJsonStrategy },
+      { name: 'instagram:graphql', fn: instagramGraphqlStrategy },
       { name: 'instagram:og-meta', fn: instagramOgMetaStrategy },
     ],
   },
