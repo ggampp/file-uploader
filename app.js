@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const pkg = require('./package.json');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -8,6 +9,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'views/index.html'));
+});
+
+app.get('/api/version', (req, res) => {
+  res.json({ version: pkg.version });
 });
 
 const BROWSER_UA =
