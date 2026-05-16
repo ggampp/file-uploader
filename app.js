@@ -1,47 +1,155 @@
-var express = require('express');
-var app = express();
-var path = require('path');
-var formidable = require('formidable');
-var fs = require('fs');
+const express = require('express');
+const path = require('path');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('/', function(req, res){
+app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'views/index.html'));
 });
 
-app.post('/upload', function(req, res){
+const UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-  // create an incoming form object
-  var form = new formidable.IncomingForm();
+function extractShortcode(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    if (!/(^|\.)instagram\.com$/i.test(u.hostname)) return null;
+    const m = u.pathname.match(/^\/(?:[^/]+\/)?(reel|reels|p|tv)\/([A-Za-z0-9_-]+)/);
+    return m ? m[2] : null;
+  } catch {
+    return null;
+  }
+}
 
-  // specify that we want to allow the user to upload multiple files in a single request
-  form.multiples = true;
+function unescapeJsonString(s) {
+  try {
+    return JSON.parse('"' + s + '"');
+  } catch {
+    return s;
+  }
+}
 
-  // store all uploads in the /uploads directory
-  form.uploadDir = path.join(__dirname, '/uploads');
+function decodeHtmlEntities(s) {
+  return s
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
 
-  // every time a file has been uploaded successfully,
-  // rename it to it's orignal name
-  form.on('file', function(field, file) {
-    fs.rename(file.path, path.join(form.uploadDir, file.name));
+async function fetchEmbedHtml(shortcode) {
+  const embedUrl = `https://www.instagram.com/p/${shortcode}/embed/captioned/`;
+  const r = await fetch(embedUrl, {
+    headers: {
+      'User-Agent': UA,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
   });
+  if (!r.ok) throw new Error('Não foi possível acessar o Reels (status ' + r.status + ')');
+  return await r.text();
+}
 
-  // log any errors that occur
-  form.on('error', function(err) {
-    console.log('An error has occured: \n' + err);
-  });
+function parseReel(html) {
+  let videoUrl = null;
+  let m = html.match(/"video_url":"([^"]+)"/);
+  if (m) videoUrl = unescapeJsonString(m[1]);
+  if (!videoUrl) {
+    m = html.match(/<meta property="og:video" content="([^"]+)"/);
+    if (m) videoUrl = decodeHtmlEntities(m[1]);
+  }
+  if (!videoUrl) {
+    m = html.match(/<video[^>]*src="([^"]+)"/i);
+    if (m) videoUrl = decodeHtmlEntities(m[1]);
+  }
 
-  // once all the files have been uploaded, send a response to the client
-  form.on('end', function() {
-    res.end('success');
-  });
+  let thumbnail = null;
+  m = html.match(/"display_url":"([^"]+)"/);
+  if (m) thumbnail = unescapeJsonString(m[1]);
+  if (!thumbnail) {
+    m = html.match(/<meta property="og:image" content="([^"]+)"/);
+    if (m) thumbnail = decodeHtmlEntities(m[1]);
+  }
 
-  // parse the incoming request containing the form data
-  form.parse(req);
+  let caption = null;
+  m = html.match(/<meta property="og:title" content="([^"]+)"/);
+  if (m) caption = decodeHtmlEntities(m[1]);
 
+  return { videoUrl, thumbnail, caption };
+}
+
+app.get('/api/reel', async (req, res) => {
+  try {
+    const url = req.query.url;
+    if (!url) return res.status(400).json({ error: 'Parâmetro "url" obrigatório' });
+    const shortcode = extractShortcode(url);
+    if (!shortcode) return res.status(400).json({ error: 'Link do Instagram inválido' });
+
+    const html = await fetchEmbedHtml(shortcode);
+    const data = parseReel(html);
+    if (!data.videoUrl) {
+      return res.status(404).json({
+        error: 'Vídeo não encontrado. O post pode ser privado, ter sido removido ou não conter vídeo.',
+      });
+    }
+    res.json({ ...data, shortcode });
+  } catch (err) {
+    console.error('reel error:', err);
+    res.status(500).json({ error: err.message || 'Erro interno' });
+  }
 });
 
-var server = app.listen(3000, function(){
-  console.log('Server listening on port 3000');
+app.get('/api/download', async (req, res) => {
+  try {
+    const mediaUrl = req.query.url;
+    if (!mediaUrl) return res.status(400).send('Parâmetro "url" obrigatório');
+
+    let parsed;
+    try {
+      parsed = new URL(mediaUrl);
+    } catch {
+      return res.status(400).send('URL inválida');
+    }
+    if (parsed.protocol !== 'https:' || !/\.(cdninstagram|fbcdn)\.net$/i.test(parsed.hostname)) {
+      return res.status(400).send('URL de mídia não permitida');
+    }
+
+    const rawName = (req.query.filename || 'reel.mp4').toString();
+    const filename = rawName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'reel.mp4';
+
+    const upstream = await fetch(mediaUrl, {
+      headers: { 'User-Agent': UA, Referer: 'https://www.instagram.com/' },
+    });
+    if (!upstream.ok || !upstream.body) {
+      return res.status(502).send('Falha ao baixar o vídeo (' + upstream.status + ')');
+    }
+
+    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'video/mp4');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    const len = upstream.headers.get('content-length');
+    if (len) res.setHeader('Content-Length', len);
+
+    const reader = upstream.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!res.write(Buffer.from(value))) {
+        await new Promise((resolve) => res.once('drain', resolve));
+      }
+    }
+    res.end();
+  } catch (err) {
+    console.error('download error:', err);
+    if (!res.headersSent) res.status(500).send('Erro interno');
+    else res.end();
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Instagram Reels Downloader rodando em http://localhost:${PORT}`);
 });

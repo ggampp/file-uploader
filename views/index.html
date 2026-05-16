@@ -1,39 +1,44 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-
-  <title>File Uploader - coligo.io</title>
-  <link href='https://fonts.googleapis.com/css?family=Raleway' rel='stylesheet' type='text/css'>
-  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css">
-  <link href="css/styles.css" rel="stylesheet">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reels Downloader</title>
+  <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
+  <main class="container">
+    <header>
+      <h1>Reels Downloader</h1>
+      <p class="subtitle">Cole o link de um Reels público do Instagram e baixe o vídeo em MP4.</p>
+    </header>
 
-  <div class="container">
-    <div class="row">
-      <div class="col-xs-12">
-        <div class="panel panel-default">
-          <div class="panel-body">
-            <span class="glyphicon glyphicon-cloud-upload"></span>
-            <h2>File Uploader</h2>
-            <h4>coligo.io</h4>
-            <div class="progress">
-              <div class="progress-bar" role="progressbar"></div>
-            </div>
-            <button class="btn btn-lg upload-btn" type="button">Upload File</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+    <form id="reel-form" autocomplete="off">
+      <input
+        type="url"
+        id="reel-url"
+        name="url"
+        placeholder="https://www.instagram.com/reel/..."
+        required
+      >
+      <button type="submit" id="submit-btn">Buscar</button>
+    </form>
 
-  <input id="upload-input" type="file" name="uploads[]" multiple="multiple"></br>
+    <div id="status" role="status" aria-live="polite"></div>
 
-  <script src="https://code.jquery.com/jquery-2.2.0.min.js"></script>
-  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"></script>
-  <script src="javascripts/upload.js"></script>
+    <section id="result" hidden>
+      <video id="preview" controls playsinline preload="metadata"></video>
+      <p id="caption"></p>
+      <a id="download-link" class="download-btn" download>
+        Baixar Reel (.mp4)
+      </a>
+    </section>
+  </main>
+
+  <footer>
+    <small>Use apenas para conteúdo público e respeite os direitos do criador.</small>
+  </footer>
+
+  <script src="/javascripts/main.js"></script>
 </body>
 </html>
