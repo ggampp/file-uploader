@@ -18,7 +18,7 @@ acontecendo.
 |---|---|---|
 | Instagram | embed `/embed/captioned/` + `contextJSON` (UA crawler) | página `/reel/` + meta `og:video` (UA Googlebot) |
 | Twitter   | `cdn.syndication.twimg.com/tweet-result` (oficial-ish) | `api.vxtwitter.com` (community mirror) |
-| YouTube   | `@distube/ytdl-core` com formato mp4 áudio+vídeo | `ytdl-core` fallback video-only |
+| YouTube   | `@distube/ytdl-core` mp4 áudio+vídeo combinado | `ytdl-core` fallback video-only + tentativas em instâncias **Piped** públicas |
 
 O download é proxiado por `/api/download` para forçar `Content-Disposition`
 e burlar restrições de CORS/cookies. A allowlist do proxy cobre:
@@ -30,18 +30,25 @@ e burlar restrições de CORS/cookies. A allowlist do proxy cobre:
 ## Caveat sobre YouTube
 
 `ytdl-core` precisa fazer requisições para o YouTube a partir do servidor.
-IPs de provedores de nuvem (Render, Heroku, Vercel, etc.) são
-frequentemente *rate-limited* ou bloqueados (HTTP 429) e o YouTube muda o
-formato do player com frequência. Resultado:
+IPs de provedores de nuvem (Render, Heroku, Vercel, etc.) são quase
+sempre *rate-limited* ou bloqueados (HTTP 429) e o YouTube muda o player
+com frequência. Como fallback adicional o app tenta algumas instâncias
+**Piped** públicas, mas a rede Piped degradou bastante em 2024-2025 e
+boa parte das instâncias está offline ou retornando 5xx.
 
-- Pode funcionar.
-- Pode dar erro 429 ("Too Many Requests") — sem o que fazer no nível do
-  código além de aguardar.
-- Pode quebrar quando o YouTube atualiza o player; basta atualizar
-  `@distube/ytdl-core` para a versão mais nova.
+Recomendação: para uso confiável de YouTube, rode o app **localmente**
+(seu IP residencial é tratado como usuário comum). Para Instagram e
+X.com a versão hospedada funciona bem.
 
-Para uso 100% confiável de YouTube, rode o app localmente (seu IP
-residencial é tratado como usuário comum).
+## Download seguro
+
+O `/api/download` aceita uma URL via dois mecanismos:
+- **Allowlist de hosts** (`*.cdninstagram.com`, `*.fbcdn.net`,
+  `*.twimg.com`, `*.googlevideo.com`)
+- **URL assinada via HMAC** com segredo do servidor (`DOWNLOAD_SECRET`
+  por env, gerado em memória se não definido). Estratégias internas
+  emitem `downloadUrl` já assinado, permitindo proxy mesmo de hosts
+  fora do allowlist (ex.: Piped) sem virar open proxy.
 
 ## Requisitos
 
@@ -61,6 +68,6 @@ Acesse <http://localhost:3000>.
 - `GET /api/version` → `{ version }`.
 - `GET /api/extract?url=<link>` → **SSE stream**. Eventos:
   - `event: log` com `{ level, msg, time }`
-  - `event: result` com `{ ok, platform, strategy, videoUrl, thumbnail, caption, shortcode }` ou `{ ok: false, error }`
-- `GET /api/download?url=<media-url>&filename=<name.mp4>` → proxy de
-  download direto do CDN (só hosts no allowlist).
+  - `event: result` com `{ ok, platform, strategy, videoUrl, downloadUrl, thumbnail, caption, shortcode }` ou `{ ok: false, error }`
+- `GET /api/download?url=<media-url>&filename=<name.mp4>[&sig=<hmac>]`
+  → proxy de download (hosts do allowlist ou URLs assinadas pelo servidor).
