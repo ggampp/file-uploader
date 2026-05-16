@@ -198,6 +198,11 @@ video {
   color: #ddd;
 }
 
+.log-actions {
+  display: flex;
+  gap: 12px;
+}
+
 .link-btn {
   background: transparent;
   border: none;
