@@ -1,6 +1,6 @@
 {
   "name": "reels-downloader",
-  "version": "1.2.1",
+  "version": "1.3.1",
   "description": "Web app para baixar Reels públicos do Instagram a partir de um link.",
   "main": "app.js",
   "scripts": {

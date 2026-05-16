@@ -13,6 +13,7 @@
   var logPanel = document.getElementById('log-panel');
   var logEl = document.getElementById('log');
   var logClear = document.getElementById('log-clear');
+  var logCopy = document.getElementById('log-copy');
 
   var currentEs = null;
 
@@ -60,6 +61,37 @@
   logClear.addEventListener('click', function () {
     clearLog();
     logPanel.hidden = true;
+  });
+
+  logCopy.addEventListener('click', async function () {
+    var text = logEl.innerText || logEl.textContent || '';
+    if (!text.trim()) {
+      setStatus('Log vazio.', 'error');
+      return;
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      var prev = logCopy.textContent;
+      logCopy.textContent = 'copiado ✓';
+      setTimeout(function () { logCopy.textContent = prev; }, 1500);
+    } catch (err) {
+      setStatus(
+        'Não foi possível copiar o log: ' +
+          (err && err.message ? err.message : err),
+        'error'
+      );
+    }
   });
 
   pasteBtn.addEventListener('click', async function () {
@@ -121,17 +153,7 @@
 
       preview.src = data.videoUrl;
       captionEl.textContent = data.caption || '';
-
-      var filename =
-        (data.platform || 'video') +
-        '-' +
-        (data.shortcode || Date.now()) +
-        '.mp4';
-      downloadLink.href =
-        '/api/download?url=' +
-        encodeURIComponent(data.videoUrl) +
-        '&filename=' +
-        encodeURIComponent(filename);
+      downloadLink.href = data.downloadUrl;
 
       resultEl.hidden = false;
       setStatus(

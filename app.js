@@ -2,6 +2,7 @@ process.env.YTDL_NO_UPDATE = process.env.YTDL_NO_UPDATE || '1';
 
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const pkg = require('./package.json');
 
 const app = express();
@@ -25,6 +26,41 @@ const ALLOWED_DOWNLOAD_HOSTS = [
   /(?:^|\.)twimg\.com$/i,
   /(?:^|\.)googlevideo\.com$/i,
 ];
+
+const DOWNLOAD_SECRET =
+  process.env.DOWNLOAD_SECRET || crypto.randomBytes(32).toString('hex');
+
+function signDownloadUrl(mediaUrl) {
+  return crypto
+    .createHmac('sha256', DOWNLOAD_SECRET)
+    .update(mediaUrl)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+function verifyDownloadSig(mediaUrl, sig) {
+  if (!sig || typeof sig !== 'string' || sig.length !== 32) return false;
+  const expected = signDownloadUrl(mediaUrl);
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(sig, 'hex'),
+      Buffer.from(expected, 'hex')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function buildDownloadUrl(mediaUrl, filename) {
+  return (
+    '/api/download?url=' +
+    encodeURIComponent(mediaUrl) +
+    '&filename=' +
+    encodeURIComponent(filename) +
+    '&sig=' +
+    signDownloadUrl(mediaUrl)
+  );
+}
 
 // ============================================================
 // helpers
@@ -96,6 +132,54 @@ async function instagramContextJsonStrategy(url, log) {
   return {
     videoUrl: media.video_url,
     thumbnail: media.display_url || null,
+    caption:
+      (media.edge_media_to_caption &&
+        media.edge_media_to_caption.edges &&
+        media.edge_media_to_caption.edges[0] &&
+        media.edge_media_to_caption.edges[0].node &&
+        media.edge_media_to_caption.edges[0].node.text) ||
+      null,
+    shortcode,
+  };
+}
+
+// Instagram's web GraphQL endpoint. Works for Reels that the embed page hides
+// behind a login/age wall. Requires MINIMAL headers — adding Origin/Referer/
+// X-IG-App-ID flips it to 401 "Please wait a few minutes" (anti-bot fingerprint).
+const INSTAGRAM_GRAPHQL_DOC_ID = '8845758582119845';
+
+async function instagramGraphqlStrategy(url, log) {
+  const shortcode = extractInstagramShortcode(url);
+  if (!shortcode) throw new Error('shortcode não encontrado');
+  log(`shortcode: ${shortcode}`);
+
+  const variables = encodeURIComponent(JSON.stringify({ shortcode }));
+  const apiUrl =
+    'https://www.instagram.com/graphql/query/' +
+    `?doc_id=${INSTAGRAM_GRAPHQL_DOC_ID}&variables=${variables}`;
+  log(`POST graphql doc_id=${INSTAGRAM_GRAPHQL_DOC_ID} (UA-only)`);
+
+  const r = await fetch(apiUrl, { headers: { 'User-Agent': BROWSER_UA } });
+  if (!r.ok) {
+    let body = '';
+    try { body = (await r.text()).slice(0, 120); } catch {}
+    throw new Error(`HTTP ${r.status} ${body}`);
+  }
+  const data = await r.json();
+  const media = data && data.data && data.data.xdt_shortcode_media;
+  if (!media) {
+    throw new Error(
+      (data && data.message) || 'resposta sem xdt_shortcode_media'
+    );
+  }
+  if (!media.video_url) {
+    throw new Error('media sem video_url (pode não conter vídeo)');
+  }
+  log(`vídeo encontrado: ${media.__typename}`);
+
+  return {
+    videoUrl: media.video_url,
+    thumbnail: media.display_url || media.thumbnail_src || null,
     caption:
       (media.edge_media_to_caption &&
         media.edge_media_to_caption.edges &&
@@ -262,11 +346,26 @@ function extractYouTubeId(rawUrl) {
   }
 }
 
+function ytdlError(e) {
+  const msg = (e && e.message) || String(e);
+  if (/429/.test(msg)) {
+    return new Error(
+      'YouTube respondeu 429 — IP do servidor rate-limited. Em geral acontece em IPs de cloud (Render/Heroku). Tente rodar localmente.'
+    );
+  }
+  return new Error(msg);
+}
+
 async function youtubeYtdlCoreStrategy(url, log) {
   const ytdl = require('@distube/ytdl-core');
   if (!ytdl.validateURL(url)) throw new Error('URL não reconhecida pelo ytdl-core');
   log('ytdl-core getInfo()...');
-  const info = await ytdl.getInfo(url);
+  let info;
+  try {
+    info = await ytdl.getInfo(url);
+  } catch (e) {
+    throw ytdlError(e);
+  }
 
   const combined = info.formats.filter(
     (f) => f.container === 'mp4' && f.hasAudio && f.hasVideo && f.url
@@ -292,7 +391,12 @@ async function youtubeYtdlCoreVideoOnlyStrategy(url, log) {
   const ytdl = require('@distube/ytdl-core');
   if (!ytdl.validateURL(url)) throw new Error('URL não reconhecida');
   log('ytdl-core getInfo() fallback (video-only mp4)...');
-  const info = await ytdl.getInfo(url);
+  let info;
+  try {
+    info = await ytdl.getInfo(url);
+  } catch (e) {
+    throw ytdlError(e);
+  }
 
   const videoOnly = info.formats.filter(
     (f) => f.container === 'mp4' && f.hasVideo && f.url
@@ -316,6 +420,70 @@ async function youtubeYtdlCoreVideoOnlyStrategy(url, log) {
   };
 }
 
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://api-piped.mha.fi',
+  'https://pipedapi.adminforge.de',
+  'https://piapi.ggtyler.dev',
+];
+
+async function youtubePipedStrategy(url, log) {
+  const id = extractYouTubeId(url);
+  if (!id) throw new Error('ID do vídeo ausente');
+  log(`video id: ${id}`);
+
+  let lastErr = null;
+  for (const inst of PIPED_INSTANCES) {
+    log(`tentando ${inst}`);
+    try {
+      const apiUrl = `${inst}/streams/${id}`;
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 10000);
+      let r;
+      try {
+        r = await fetch(apiUrl, {
+          headers: { 'User-Agent': BROWSER_UA, Accept: 'application/json' },
+          signal: ctrl.signal,
+        });
+      } finally {
+        clearTimeout(t);
+      }
+      if (!r.ok) {
+        lastErr = new Error(`HTTP ${r.status}`);
+        log(`  HTTP ${r.status}`);
+        continue;
+      }
+      const data = await r.json();
+      const streams = Array.isArray(data.videoStreams) ? data.videoStreams : [];
+      const isMp4 = (s) =>
+        /mp4/i.test(s.format || '') || /video\/mp4/i.test(s.mimeType || '');
+      const combined = streams
+        .filter((s) => isMp4(s) && s.videoOnly === false)
+        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+      const anyMp4 = streams
+        .filter(isMp4)
+        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+      const pick = combined[0] || anyMp4[0];
+      if (!pick || !pick.url) {
+        lastErr = new Error('sem stream mp4');
+        log(`  sem stream mp4`);
+        continue;
+      }
+      log(`  pick: ${pick.quality || '?'} ${pick.format || ''}`);
+      return {
+        videoUrl: pick.url,
+        thumbnail: data.thumbnailUrl || null,
+        caption: data.title || null,
+        shortcode: id,
+      };
+    } catch (e) {
+      lastErr = e;
+      log(`  ${inst} erro: ${e.message}`);
+    }
+  }
+  throw lastErr || new Error('todas as instâncias Piped falharam');
+}
+
 // ============================================================
 // platform registry
 // ============================================================
@@ -324,6 +492,7 @@ const PLATFORMS = {
   instagram: {
     strategies: [
       { name: 'instagram:contextJSON', fn: instagramContextJsonStrategy },
+      { name: 'instagram:graphql', fn: instagramGraphqlStrategy },
       { name: 'instagram:og-meta', fn: instagramOgMetaStrategy },
     ],
   },
@@ -337,6 +506,7 @@ const PLATFORMS = {
     strategies: [
       { name: 'youtube:ytdl-core-combined', fn: youtubeYtdlCoreStrategy },
       { name: 'youtube:ytdl-core-video-only', fn: youtubeYtdlCoreVideoOnlyStrategy },
+      { name: 'youtube:piped', fn: youtubePipedStrategy },
     ],
   },
 };
@@ -409,11 +579,14 @@ app.get('/api/extract', async (req, res) => {
         const result = await fn(url, (m) => log(`   ${m}`));
         if (result && result.videoUrl) {
           log(`✓ sucesso em ${Date.now() - t0}ms via ${name}`, 'success');
+          const filename =
+            platform + '-' + (result.shortcode || Date.now()) + '.mp4';
           send('result', {
             ok: true,
             platform,
             strategy: name,
             videoUrl: result.videoUrl,
+            downloadUrl: buildDownloadUrl(result.videoUrl, filename),
             thumbnail: result.thumbnail || null,
             caption: result.caption || null,
             shortcode: result.shortcode || null,
@@ -457,10 +630,13 @@ app.get('/api/download', async (req, res) => {
     } catch {
       return res.status(400).send('URL inválida');
     }
-    if (
-      parsed.protocol !== 'https:' ||
-      !ALLOWED_DOWNLOAD_HOSTS.some((re) => re.test(parsed.hostname))
-    ) {
+    if (parsed.protocol !== 'https:') {
+      return res.status(400).send('Apenas URLs https são permitidas');
+    }
+    const sig = (req.query.sig || '').toString();
+    const sigOk = verifyDownloadSig(mediaUrl, sig);
+    const hostOk = ALLOWED_DOWNLOAD_HOSTS.some((re) => re.test(parsed.hostname));
+    if (!sigOk && !hostOk) {
       return res
         .status(400)
         .send('Host de mídia não permitido: ' + parsed.hostname);
