@@ -4,9 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Multi Downloader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
+  <div class="top-strip">
+    <strong>Uso pessoal.</strong> Respeite os direitos do criador do conteúdo.
+  </div>
+
   <main class="container">
     <header>
       <div class="header-row">
@@ -15,28 +22,33 @@
       </div>
       <p class="subtitle">
         Cole um link de <strong>Instagram</strong>, <strong>X.com</strong> ou
-        <strong>YouTube</strong> e baixe o vídeo em MP4. Uso pessoal.
+        <strong>YouTube</strong> e baixe o vídeo em MP4.
       </p>
     </header>
 
-    <form id="reel-form" autocomplete="off">
-      <div class="input-row">
-        <input
-          type="url"
-          id="reel-url"
-          name="url"
-          placeholder="https://www.instagram.com/reel/... | https://x.com/.../status/... | https://youtu.be/..."
-          required
-        >
-        <button type="button" id="clear-btn" class="icon-btn" title="Limpar campo" aria-label="Limpar campo">✕</button>
-      </div>
-      <div class="actions-row">
-        <button type="button" id="paste-btn" class="secondary-btn">Colar do clipboard</button>
-        <button type="submit" id="submit-btn" class="primary-btn">Buscar</button>
-      </div>
-    </form>
+    <section class="card">
+      <form id="reel-form" autocomplete="off">
+        <div>
+          <label for="reel-url" class="field-label">Link do vídeo</label>
+          <div class="input-row">
+            <input
+              type="url"
+              id="reel-url"
+              name="url"
+              placeholder="https://www.instagram.com/reel/... | https://x.com/.../status/... | https://youtu.be/..."
+              required
+            >
+            <button type="button" id="clear-btn" class="icon-btn" title="Limpar campo" aria-label="Limpar campo">✕</button>
+          </div>
+        </div>
+        <div class="actions-row">
+          <button type="button" id="paste-btn" class="secondary-btn">Colar do clipboard</button>
+          <button type="submit" id="submit-btn" class="primary-btn">Buscar</button>
+        </div>
+      </form>
 
-    <div id="status" role="status" aria-live="polite"></div>
+      <div id="status" role="status" aria-live="polite"></div>
+    </section>
 
     <section id="log-panel" hidden>
       <div class="log-header">
@@ -59,7 +71,7 @@
   </main>
 
   <footer>
-    <small>Uso pessoal. Respeite os direitos do criador do conteúdo.</small>
+    <small>Multi Downloader — feito com cuidado. Uso pessoal.</small>
   </footer>
 
   <script src="/javascripts/main.js"></script>
