@@ -1,0 +1,13 @@
+.git
+.gitignore
+node_modules
+npm-debug.log*
+*.log
+.env
+.env.*
+coverage
+.DS_Store
+README.md
+LICENSE
+render.yaml
+Untitled Diagram.xml
