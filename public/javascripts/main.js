@@ -105,8 +105,10 @@
         setStatus('Clipboard vazio.', 'error');
         return;
       }
-      urlInput.value = text.trim();
-      setStatus('Link colado.', 'success');
+      var pasted = text.trim();
+      urlInput.value = pasted;
+      setStatus('Link colado. Iniciando busca...', 'success');
+      startExtraction(pasted);
     } catch (err) {
       setStatus(
         'Não foi possível ler o clipboard: ' +
