@@ -1,7 +1,6 @@
 (function () {
   var form = document.getElementById('reel-form');
   var urlInput = document.getElementById('reel-url');
-  var submitBtn = document.getElementById('submit-btn');
   var clearBtn = document.getElementById('clear-btn');
   var pasteBtn = document.getElementById('paste-btn');
   var statusEl = document.getElementById('status');
@@ -35,7 +34,6 @@
   }
 
   function appendLog(entry) {
-    logPanel.hidden = false;
     var line = document.createElement('div');
     line.className = 'log-line log-' + (entry.level || 'info');
     var t = entry.time
@@ -107,7 +105,6 @@
       }
       var pasted = text.trim();
       urlInput.value = pasted;
-      setStatus('Link colado. Iniciando busca...', 'success');
       startExtraction(pasted);
     } catch (err) {
       setStatus(
@@ -124,10 +121,9 @@
       currentEs = null;
     }
 
-    submitBtn.disabled = true;
     resetResult();
     clearLog();
-    logPanel.hidden = false;
+    logPanel.hidden = true;
     setStatus('Processando...');
 
     var es = new EventSource('/api/extract?url=' + encodeURIComponent(url));
@@ -146,9 +142,9 @@
       try { data = JSON.parse(e.data); } catch (err) { data = { ok: false, error: 'JSON inválido' }; }
       es.close();
       currentEs = null;
-      submitBtn.disabled = false;
 
       if (!data.ok) {
+        logPanel.hidden = false;
         setStatus('Erro: ' + (data.error || 'falha desconhecida'), 'error');
         return;
       }
@@ -168,7 +164,7 @@
       if (finished) return;
       try { es.close(); } catch (e) {}
       currentEs = null;
-      submitBtn.disabled = false;
+      logPanel.hidden = false;
       setStatus('Conexão com servidor interrompida.', 'error');
     };
   }
