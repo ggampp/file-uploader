@@ -13,20 +13,132 @@
   var logEl = document.getElementById('log');
   var logClear = document.getElementById('log-clear');
   var logCopy = document.getElementById('log-copy');
+  var carouselSection = document.getElementById('carousel-section');
+  var carouselEl = document.getElementById('carousel');
+  var carouselCount = document.getElementById('carousel-count');
 
   var currentEs = null;
+  var activeVid = null;
 
   function setStatus(msg, kind) {
     statusEl.textContent = msg || '';
     statusEl.className = kind || '';
   }
 
+  function formatTime(secs) {
+    var m = Math.floor(secs / 60);
+    var s = Math.floor(secs % 60);
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function cancelExtraction() {
+    if (activeVid) {
+      activeVid._cancelled = true;
+      try { activeVid.src = ''; } catch (e) {}
+      try { activeVid.remove(); } catch (e) {}
+      activeVid = null;
+    }
+  }
+
   function resetResult() {
+    cancelExtraction();
     resultEl.hidden = true;
     preview.removeAttribute('src');
     preview.load();
     captionEl.textContent = '';
     downloadLink.removeAttribute('href');
+    carouselSection.hidden = true;
+    carouselEl.innerHTML = '';
+    carouselCount.textContent = '';
+  }
+
+  function extractFrames(streamUrl) {
+    cancelExtraction();
+
+    var vid = document.createElement('video');
+    vid._cancelled = false;
+    vid.muted = true;
+    vid.preload = 'auto';
+    vid.crossOrigin = 'anonymous';
+    vid.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
+    document.body.appendChild(vid);
+    activeVid = vid;
+
+    var canvas = document.createElement('canvas');
+    var ctx = canvas.getContext('2d');
+
+    vid.addEventListener('loadedmetadata', function () {
+      if (vid._cancelled) { vid.remove(); return; }
+
+      var duration = vid.duration;
+      if (!duration || !isFinite(duration) || duration <= 0) {
+        vid.remove();
+        activeVid = null;
+        return;
+      }
+
+      var MAX = 120;
+      var count = Math.min(Math.ceil(duration), MAX);
+      var step = duration / count;
+      var timestamps = [];
+      for (var i = 0; i < count; i++) timestamps.push(i * step);
+
+      var vw = vid.videoWidth || 320;
+      var vh = vid.videoHeight || 180;
+      var thumbW = 160;
+      var thumbH = Math.round(thumbW * vh / vw);
+      canvas.width = thumbW;
+      canvas.height = thumbH;
+
+      var idx = 0;
+
+      function captureFrame() {
+        if (vid._cancelled) { vid.remove(); activeVid = null; return; }
+        if (idx >= timestamps.length) {
+          vid.remove();
+          activeVid = null;
+          if (carouselEl.children.length > 0) carouselSection.hidden = false;
+          return;
+        }
+
+        function onSeeked() {
+          vid.removeEventListener('seeked', onSeeked);
+          if (vid._cancelled) { vid.remove(); activeVid = null; return; }
+
+          try {
+            ctx.drawImage(vid, 0, 0, thumbW, thumbH);
+            var dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+            var img = document.createElement('img');
+            img.src = dataUrl;
+            img.className = 'carousel-frame';
+            var ts = timestamps[idx];
+            img.title = formatTime(ts);
+            (function (t) {
+              img.addEventListener('click', function () {
+                preview.currentTime = t;
+                preview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              });
+            })(ts);
+            carouselEl.appendChild(img);
+            if (carouselEl.children.length === 1) carouselSection.hidden = false;
+            carouselCount.textContent = '(' + carouselEl.children.length + '/' + timestamps.length + ')';
+          } catch (e) {
+            // SecurityError: canvas tainted — skip frame
+          }
+
+          idx++;
+          captureFrame();
+        }
+
+        vid.addEventListener('seeked', onSeeked);
+        vid.currentTime = timestamps[idx];
+      }
+
+      captureFrame();
+    });
+
+    vid.src = streamUrl;
+    vid.load();
   }
 
   function clearLog() {
@@ -158,6 +270,8 @@
         'Pronto via ' + (data.strategy || 'estratégia') + '. Use o botão abaixo para baixar.',
         'success'
       );
+
+      if (data.streamUrl) extractFrames(data.streamUrl);
     });
 
     es.onerror = function () {
