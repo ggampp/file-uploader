@@ -84,6 +84,32 @@ function decodeHtmlEntities(s) {
     .replace(/&gt;/g, '>');
 }
 
+function extractCaption(media) {
+  return (
+    (media.edge_media_to_caption &&
+      media.edge_media_to_caption.edges &&
+      media.edge_media_to_caption.edges[0] &&
+      media.edge_media_to_caption.edges[0].node &&
+      media.edge_media_to_caption.edges[0].node.text) ||
+    null
+  );
+}
+
+function extractSidecarItems(media) {
+  const edges =
+    (media.edge_sidecar_to_children && media.edge_sidecar_to_children.edges) || [];
+  return edges
+    .map((e) => {
+      const n = e.node;
+      if (n.is_video && n.video_url)
+        return { type: 'video', url: n.video_url, thumbnail: n.display_url || null };
+      if (n.display_url)
+        return { type: 'image', url: n.display_url, thumbnail: n.display_url };
+      return null;
+    })
+    .filter(Boolean);
+}
+
 function detectPlatform(rawUrl) {
   let u;
   try {
@@ -135,21 +161,23 @@ async function instagramContextJsonStrategy(url, log) {
   const inner = JSON.parse('"' + m[1] + '"');
   const data = JSON.parse(inner);
   const media = (data.context && data.context.media) || data.shortcode_media;
-  if (!media || !media.video_url) throw new Error('media.video_url ausente');
+  if (!media) throw new Error('media ausente');
 
+  const caption = extractCaption(media);
+
+  if (
+    (media.__typename === 'GraphSidecar' || media.__typename === 'XDTGraphSidecar') &&
+    media.edge_sidecar_to_children
+  ) {
+    log('carrossel detectado');
+    const items = extractSidecarItems(media);
+    if (!items.length) throw new Error('carrossel sem itens');
+    return { carousel: true, items, caption, shortcode };
+  }
+
+  if (!media.video_url) throw new Error('media.video_url ausente');
   log(`vídeo encontrado em shortcode_media`);
-  return {
-    videoUrl: media.video_url,
-    thumbnail: media.display_url || null,
-    caption:
-      (media.edge_media_to_caption &&
-        media.edge_media_to_caption.edges &&
-        media.edge_media_to_caption.edges[0] &&
-        media.edge_media_to_caption.edges[0].node &&
-        media.edge_media_to_caption.edges[0].node.text) ||
-      null,
-    shortcode,
-  };
+  return { videoUrl: media.video_url, thumbnail: media.display_url || null, caption, shortcode };
 }
 
 // Instagram's web GraphQL endpoint. Works for Reels that the embed page hides
@@ -181,21 +209,27 @@ async function instagramGraphqlStrategy(url, log) {
       (data && data.message) || 'resposta sem xdt_shortcode_media'
     );
   }
+
+  const caption = extractCaption(media);
+
+  if (
+    (media.__typename === 'XDTGraphSidecar' || media.__typename === 'GraphSidecar') &&
+    media.edge_sidecar_to_children
+  ) {
+    log('carrossel detectado');
+    const items = extractSidecarItems(media);
+    if (!items.length) throw new Error('carrossel sem itens');
+    return { carousel: true, items, caption, shortcode };
+  }
+
   if (!media.video_url) {
     throw new Error('media sem video_url (pode não conter vídeo)');
   }
   log(`vídeo encontrado: ${media.__typename}`);
-
   return {
     videoUrl: media.video_url,
     thumbnail: media.display_url || media.thumbnail_src || null,
-    caption:
-      (media.edge_media_to_caption &&
-        media.edge_media_to_caption.edges &&
-        media.edge_media_to_caption.edges[0] &&
-        media.edge_media_to_caption.edges[0].node &&
-        media.edge_media_to_caption.edges[0].node.text) ||
-      null,
+    caption,
     shortcode,
   };
 }
@@ -586,21 +620,46 @@ app.get('/api/extract', async (req, res) => {
       const t0 = Date.now();
       try {
         const result = await fn(url, (m) => log(`   ${m}`));
-        if (result && result.videoUrl) {
+        if (result && (result.videoUrl || result.carousel)) {
           log(`✓ sucesso em ${Date.now() - t0}ms via ${name}`, 'success');
-          const filename =
-            platform + '-' + (result.shortcode || Date.now()) + '.mp4';
-          send('result', {
-            ok: true,
-            platform,
-            strategy: name,
-            videoUrl: result.videoUrl,
-            streamUrl: buildStreamUrl(result.videoUrl),
-            downloadUrl: buildDownloadUrl(result.videoUrl, filename),
-            thumbnail: result.thumbnail || null,
-            caption: result.caption || null,
-            shortcode: result.shortcode || null,
-          });
+          const sc = result.shortcode || Date.now();
+
+          if (result.carousel) {
+            const items = result.items.map((item, i) => {
+              const ext = item.type === 'video' ? 'mp4' : 'jpg';
+              const filename = `instagram-${sc}-${i + 1}.${ext}`;
+              return {
+                index: i + 1,
+                type: item.type,
+                url: item.url,
+                streamUrl: item.type === 'video' ? buildStreamUrl(item.url) : null,
+                downloadUrl: buildDownloadUrl(item.url, filename),
+                thumbnail: item.thumbnail || null,
+              };
+            });
+            send('result', {
+              ok: true,
+              platform,
+              strategy: name,
+              carousel: true,
+              caption: result.caption || null,
+              shortcode: result.shortcode || null,
+              items,
+            });
+          } else {
+            const filename = platform + '-' + sc + '.mp4';
+            send('result', {
+              ok: true,
+              platform,
+              strategy: name,
+              videoUrl: result.videoUrl,
+              streamUrl: buildStreamUrl(result.videoUrl),
+              downloadUrl: buildDownloadUrl(result.videoUrl, filename),
+              thumbnail: result.thumbnail || null,
+              caption: result.caption || null,
+              shortcode: result.shortcode || null,
+            });
+          }
           clearInterval(heartbeat);
           return res.end();
         }
