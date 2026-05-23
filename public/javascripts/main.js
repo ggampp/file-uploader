@@ -16,6 +16,9 @@
   var carouselSection = document.getElementById('carousel-section');
   var carouselEl = document.getElementById('carousel');
   var carouselCount = document.getElementById('carousel-count');
+  var postResult = document.getElementById('post-result');
+  var postCaption = document.getElementById('post-caption');
+  var postItemsList = document.getElementById('post-items-list');
 
   var currentEs = null;
   var activeVid = null;
@@ -31,6 +34,12 @@
     return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
   }
 
+  function resetPostResult() {
+    postResult.hidden = true;
+    postCaption.textContent = '';
+    postItemsList.innerHTML = '';
+  }
+
   function cancelExtraction() {
     if (activeVid) {
       activeVid._cancelled = true;
@@ -42,6 +51,7 @@
 
   function resetResult() {
     cancelExtraction();
+    resetPostResult();
     resultEl.hidden = true;
     preview.removeAttribute('src');
     preview.load();
@@ -50,6 +60,54 @@
     carouselSection.hidden = true;
     carouselEl.innerHTML = '';
     carouselCount.textContent = '';
+  }
+
+  function renderPostCarousel(data) {
+    postCaption.textContent = data.caption || '';
+    postItemsList.innerHTML = '';
+
+    data.items.forEach(function (item) {
+      var card = document.createElement('div');
+      card.className = 'post-item';
+
+      var mediaWrap = document.createElement('div');
+      mediaWrap.className = 'post-item-media';
+
+      if (item.type === 'video') {
+        var vid = document.createElement('video');
+        vid.controls = true;
+        vid.playsInline = true;
+        vid.preload = 'metadata';
+        vid.src = item.url;
+        mediaWrap.appendChild(vid);
+      } else {
+        var img = document.createElement('img');
+        img.src = item.url;
+        img.alt = 'Item ' + item.index;
+        mediaWrap.appendChild(img);
+      }
+
+      var footer = document.createElement('div');
+      footer.className = 'post-item-footer';
+
+      var badge = document.createElement('span');
+      badge.className = 'post-item-badge';
+      badge.textContent = (item.type === 'video' ? 'Vídeo' : 'Foto') + ' ' + item.index;
+
+      var dl = document.createElement('a');
+      dl.href = item.downloadUrl;
+      dl.download = '';
+      dl.className = 'download-btn';
+      dl.textContent = 'Baixar';
+
+      footer.appendChild(badge);
+      footer.appendChild(dl);
+      card.appendChild(mediaWrap);
+      card.appendChild(footer);
+      postItemsList.appendChild(card);
+    });
+
+    postResult.hidden = false;
   }
 
   function extractFrames(streamUrl) {
@@ -258,6 +316,15 @@
       if (!data.ok) {
         logPanel.hidden = false;
         setStatus('Erro: ' + (data.error || 'falha desconhecida'), 'error');
+        return;
+      }
+
+      if (data.carousel) {
+        renderPostCarousel(data);
+        setStatus(
+          data.items.length + ' itens via ' + (data.strategy || 'estratégia') + '.',
+          'success'
+        );
         return;
       }
 

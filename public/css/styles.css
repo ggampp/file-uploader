@@ -411,6 +411,64 @@ video {
   box-shadow: var(--shadow-frap);
 }
 
+/* ---------- Post carousel (multi-item Instagram posts) ---------- */
+#post-result {
+  margin-top: 2.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6rem;
+}
+
+#post-caption {
+  margin: 0;
+  font-size: 1.4rem;
+  color: var(--text-black-soft);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.post-item {
+  background: var(--white);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.post-item-media {
+  background: var(--black);
+  line-height: 0;
+}
+
+.post-item-media img,
+.post-item-media video {
+  width: 100%;
+  max-height: 480px;
+  object-fit: contain;
+  display: block;
+  border-radius: 0;
+}
+
+.post-item-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.2rem 1.6rem;
+  gap: 1.2rem;
+}
+
+.post-item-badge {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-black-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.post-item-footer .download-btn {
+  padding: 0.8rem 2rem;
+  font-size: 1.4rem;
+}
+
 /* ---------- Log panel (feature-band styled) ---------- */
 #log-panel {
   margin-top: 2.4rem;
