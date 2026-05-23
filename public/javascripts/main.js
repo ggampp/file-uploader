@@ -78,11 +78,11 @@
         vid.controls = true;
         vid.playsInline = true;
         vid.preload = 'metadata';
-        vid.src = item.url;
+        vid.src = item.streamUrl || item.url;
         mediaWrap.appendChild(vid);
       } else {
         var img = document.createElement('img');
-        img.src = item.url;
+        img.src = item.streamUrl || item.url;
         img.alt = 'Item ' + item.index;
         mediaWrap.appendChild(img);
       }
