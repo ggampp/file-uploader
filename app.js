@@ -632,7 +632,7 @@ app.get('/api/extract', async (req, res) => {
                 index: i + 1,
                 type: item.type,
                 url: item.url,
-                streamUrl: item.type === 'video' ? buildStreamUrl(item.url) : null,
+                streamUrl: buildStreamUrl(item.url),
                 downloadUrl: buildDownloadUrl(item.url, filename),
                 thumbnail: item.thumbnail || null,
               };
