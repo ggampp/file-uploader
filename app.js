@@ -62,6 +62,15 @@ function buildDownloadUrl(mediaUrl, filename) {
   );
 }
 
+function buildStreamUrl(mediaUrl) {
+  return (
+    '/api/stream?url=' +
+    encodeURIComponent(mediaUrl) +
+    '&sig=' +
+    signDownloadUrl(mediaUrl)
+  );
+}
+
 // ============================================================
 // helpers
 // ============================================================
@@ -586,6 +595,7 @@ app.get('/api/extract', async (req, res) => {
             platform,
             strategy: name,
             videoUrl: result.videoUrl,
+            streamUrl: buildStreamUrl(result.videoUrl),
             downloadUrl: buildDownloadUrl(result.videoUrl, filename),
             thumbnail: result.thumbnail || null,
             caption: result.caption || null,
@@ -682,6 +692,66 @@ app.get('/api/download', async (req, res) => {
     res.end();
   } catch (err) {
     console.error('download error:', err);
+    if (!res.headersSent) res.status(500).send('Erro interno');
+    else res.end();
+  }
+});
+
+app.get('/api/stream', async (req, res) => {
+  try {
+    const mediaUrl = (req.query.url || '').toString();
+    if (!mediaUrl) return res.status(400).send('Parâmetro "url" obrigatório');
+
+    let parsed;
+    try {
+      parsed = new URL(mediaUrl);
+    } catch {
+      return res.status(400).send('URL inválida');
+    }
+    if (parsed.protocol !== 'https:') {
+      return res.status(400).send('Apenas URLs https são permitidas');
+    }
+    const sig = (req.query.sig || '').toString();
+    const sigOk = verifyDownloadSig(mediaUrl, sig);
+    const hostOk = ALLOWED_DOWNLOAD_HOSTS.some((re) => re.test(parsed.hostname));
+    if (!sigOk && !hostOk) {
+      return res.status(400).send('Host de mídia não permitido: ' + parsed.hostname);
+    }
+
+    let referer = 'https://www.instagram.com/';
+    if (/twimg\.com$/i.test(parsed.hostname)) referer = 'https://twitter.com/';
+    else if (/googlevideo\.com$/i.test(parsed.hostname)) referer = 'https://www.youtube.com/';
+
+    const fetchHeaders = { 'User-Agent': BROWSER_UA, Referer: referer };
+    if (req.headers.range) fetchHeaders['Range'] = req.headers.range;
+
+    const upstream = await fetch(mediaUrl, { headers: fetchHeaders });
+    if (!upstream.ok && upstream.status !== 206) {
+      return res.status(502).send('Falha no upstream (' + upstream.status + ')');
+    }
+    if (!upstream.body) return res.status(502).send('Sem body do upstream');
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'video/mp4');
+    const ar = upstream.headers.get('accept-ranges');
+    if (ar) res.setHeader('Accept-Ranges', ar);
+    const cr = upstream.headers.get('content-range');
+    if (cr) res.setHeader('Content-Range', cr);
+    const len = upstream.headers.get('content-length');
+    if (len) res.setHeader('Content-Length', len);
+    res.status(upstream.status);
+
+    const reader = upstream.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!res.write(Buffer.from(value))) {
+        await new Promise((resolve) => res.once('drain', resolve));
+      }
+    }
+    res.end();
+  } catch (err) {
+    console.error('stream error:', err);
     if (!res.headersSent) res.status(500).send('Erro interno');
     else res.end();
   }

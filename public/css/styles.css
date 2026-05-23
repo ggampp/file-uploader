@@ -358,6 +358,59 @@ video {
 .download-btn:hover { background: var(--starbucks-green); border-color: var(--starbucks-green); }
 .download-btn:active { transform: var(--press); }
 
+/* ---------- Carousel ---------- */
+.carousel-label {
+  margin: 0 0 0.8rem;
+  font-size: 1.3rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.325px;
+  color: var(--text-black-soft);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+#carousel-count {
+  font-weight: 400;
+  font-size: 1.2rem;
+  color: var(--text-black-soft);
+}
+
+.carousel {
+  display: flex;
+  gap: 0.6rem;
+  overflow-x: auto;
+  padding-bottom: 0.6rem;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+.carousel::-webkit-scrollbar { height: 4px; }
+.carousel::-webkit-scrollbar-track { background: transparent; }
+.carousel::-webkit-scrollbar-thumb {
+  background: var(--green-light);
+  border-radius: 2px;
+}
+
+.carousel-frame {
+  flex-shrink: 0;
+  height: 90px;
+  width: auto;
+  border-radius: 6px;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition: var(--t-base);
+  border: 2px solid transparent;
+  object-fit: cover;
+}
+
+.carousel-frame:hover {
+  border-color: var(--green-accent);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-frap);
+}
+
 /* ---------- Log panel (feature-band styled) ---------- */
 #log-panel {
   margin-top: 2.4rem;
